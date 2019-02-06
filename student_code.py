@@ -129,6 +129,54 @@ class KnowledgeBase(object):
         ####################################################
         # Implementation goes here
         # Not required for the extra credit assignment
+        if isinstance(fact_or_rule, Rule):
+            return
+        fact = self._get_fact(fact_or_rule)
+        if not fact:
+            return
+        elif fact.asserted and fact.supported_by:
+            # if both asserted and supported, retract removes assertion
+            fact.asserted = False
+            return
+        elif fact.supported_by and not fact.asserted:
+            # if not asserted, but supported (inferred), do nothing
+            return
+        elif not fact.supported_by:
+            # only asserted, not supported
+            for f in fact.supports_facts:
+                actual_fact = self._get_fact(f)
+                for pair in actual_fact.supported_by:
+                    if pair[0] == fact:
+                        actual_fact.supported_by.remove(pair)
+                        self.kb_retract(actual_fact)
+            for r in fact.supports_rules:
+                actual_rule = self._get_rule(r)
+                for pair in actual_rule.supported_by:
+                    if pair[0] == fact:
+                        actual_rule.supported_by.remove(pair)
+                        self.remove_rule(actual_rule)
+            self.facts.remove(fact)
+
+    def remove_rule(self, rule):
+        if isinstance(rule, Fact):
+            return
+        if rule.asserted:
+            return
+        if rule.supported_by:
+            return
+        for f in rule.supports_facts:
+            actual_fact = self._get_fact(f)
+            for pair in actual_fact.supported_by:
+                if pair[1] == rule:
+                    actual_fact.supported_by.remove(pair)
+                    self.kb_retract(actual_fact)
+        for r in rule.supports_rules:
+            actual_rule = self._get_rule(r)
+            for pair in actual_rule.supported_by:
+                if pair[1] == rule:
+                    actual_rule.supported_by.remove(pair)
+                    self.remove_rule(actual_rule)
+        self.rules.remove(rule)
 
     def kb_explain(self, fact_or_rule):
         """
@@ -142,6 +190,52 @@ class KnowledgeBase(object):
         """
         ####################################################
         # Student code goes here
+        if factq(fact_or_rule):
+            answer = self.kb_ask(fact_or_rule)
+            if not answer:
+                return "Fact is not in the KB"
+            fact = self._get_fact(fact_or_rule)
+            out = fact.name + ': ' + str(fact.statement)
+            if fact.asserted:
+                out += ' ASSERTED'
+            out = self.print_supported(fact, out)
+        elif isinstance(fact_or_rule, Rule):
+            if fact_or_rule not in self.rules:
+                return "Rule is not in the KB"
+            rule = self._get_rule(fact_or_rule)
+            out = rule.name + ': (' + ', '.join(map(str, rule.lhs))
+            out += ') -> ' + str(rule.rhs)
+            if rule.asserted:
+                out += ' ASSERTED'
+            out = self.print_supported(rule, out)
+        return out
+
+    def print_supported(self, fact_or_rule, output, depth=0):
+        if not fact_or_rule.supported_by:
+            return output
+        for pair in fact_or_rule.supported_by:
+            depth += 1
+            output += '\n'
+            for i in range(depth):
+                output += '  '
+            output += 'SUPPORTED BY'
+            depth += 1
+            for item in pair:
+                output += '\n'
+                for i in range(depth):
+                    output += '  '
+                if factq(item):
+                    output += item.name + ': ' + str(item.statement)
+                    if item.asserted:
+                        output += ' ASSERTED'
+                else:
+                    output += item.name + ': (' + ', '.join(map(str, item.lhs)) + ') -> ' + str(item.rhs)
+                    if item.asserted:
+                        output += ' ASSERTED'
+                output = self.print_supported(item, output, depth)
+            depth = 0
+        return output
+
 
 
 class InferenceEngine(object):
@@ -161,3 +255,21 @@ class InferenceEngine(object):
         ####################################################
         # Implementation goes here
         # Not required for the extra credit assignment
+        bindings = match(fact.statement, rule.lhs[0])
+        if bindings and len(rule.lhs) == 1:
+            new_statement = instantiate(rule.rhs, bindings)
+            new_fact = Fact(new_statement, [[fact, rule]])
+            rule.supports_facts.append(new_fact)
+            fact.supports_facts.append(new_fact)
+            kb.kb_assert(new_fact)
+        elif bindings and len(rule.lhs) > 1:
+            # we don't want to make new facts, only a new rule
+            rhs_statement = instantiate(rule.rhs, bindings)
+            old_lhs = rule.lhs[1:]
+            new_lhs = []
+            for statement in old_lhs:
+                new_lhs.append(instantiate(statement, bindings))
+            new_rule = Rule([new_lhs, rhs_statement], [[fact, rule]])
+            rule.supports_rules.append(new_rule)
+            fact.supports_rules.append(new_rule)
+            kb.kb_assert(new_rule)
